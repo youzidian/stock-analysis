@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>本地股市分析</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="topNav" aria-label="页面导航">
+        <div class="navTabs">
+          <button class="navButton active" type="button" data-view="singleView">单股分析</button>
+          <button class="navButton" type="button" data-view="batchView">Sigma Model</button>
+        </div>
+        <label class="globalMarket">
+          <span>全局市场</span>
+          <select id="globalMarket">
+            <option value="">全部</option>
+            <option value="US">US</option>
+            <option value="HK">HK</option>
+          </select>
+        </label>
+      </nav>
+
+      <div id="singleView" class="view active">
+      <section class="toolbar" aria-label="分析控制">
+        <div>
+          <h1>本地股市分析</h1>
+          <p id="status">输入代码后读取日线数据并生成技术面摘要。</p>
+        </div>
+        <form id="searchForm" class="controls">
+          <label>
+            <span>股票代码</span>
+            <input id="symbolInput" name="symbol" value="AAPL" autocomplete="off" />
+          </label>
+          <label>
+            <span>周期</span>
+            <select id="periodInput" name="period">
+              <option value="3mo">3个月</option>
+              <option value="6mo">6个月</option>
+              <option value="1y" selected>1年</option>
+              <option value="2y">2年</option>
+              <option value="3y">3年</option>
+            </select>
+          </label>
+          <button type="submit">分析</button>
+        </form>
+      </section>
+
+      <section class="metrics" aria-label="关键指标">
+        <article>
+          <span>最新收盘</span>
+          <strong id="latestClose">-</strong>
+          <small id="latestDate">-</small>
+        </article>
+        <article>
+          <span>区间收益</span>
+          <strong id="periodReturn">-</strong>
+          <small>按所选周期计算</small>
+        </article>
+        <article>
+          <span>52周回撤</span>
+          <strong id="drawdown">-</strong>
+          <small id="range52w">-</small>
+        </article>
+        <article>
+          <span>综合评分</span>
+          <strong id="score">-</strong>
+          <small id="scoreLabel">-</small>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <div class="chartPanel">
+          <div class="panelHeader">
+            <h2 id="chartTitle">价格走势</h2>
+            <span id="chartHint">Close / SMA20 / SMA50</span>
+          </div>
+          <canvas id="priceChart" width="1100" height="460"></canvas>
+          <div class="panelHeader lrcHeader">
+            <h2 id="lrcTitle">LRC Tunnel</h2>
+            <span>Trend / ±2σ / ±4σ</span>
+          </div>
+          <canvas id="lrcChart" width="1100" height="460"></canvas>
+        </div>
+        <aside class="signalsPanel">
+          <div class="panelHeader">
+            <h2>信号</h2>
+            <span>仅供研究</span>
+          </div>
+          <div id="signals" class="signals"></div>
+        </aside>
+      </section>
+
+      <section class="tablePanel">
+        <div class="panelHeader">
+          <h2>最近交易日</h2>
+          <div class="pager">
+            <span id="rowCount">-</span>
+            <button id="prevHistory" type="button" aria-label="上一页">‹</button>
+            <span id="historyPage">-</span>
+            <button id="nextHistory" type="button" aria-label="下一页">›</button>
+          </div>
+        </div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>开盘</th>
+                <th>最高</th>
+                <th>最低</th>
+                <th>收盘</th>
+                <th>涨跌幅</th>
+                <th>RSI</th>
+                <th>成交量</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+
+      <div id="batchView" class="view">
+      <section class="batchPanel">
+        <div class="panelHeader">
+          <div>
+            <h2>Sigma Model</h2>
+            <span id="batchStatus">读取每日预计算的 LRC Z-score</span>
+          </div>
+          <form id="batchForm" class="batchControls">
+            <label>
+              <span>搜索</span>
+              <input id="batchSearch" name="search" placeholder="代码 / 名称 / 行业" />
+            </label>
+            <button type="submit">运行</button>
+          </form>
+        </div>
+        <section class="batchSummary" aria-label="批量摘要">
+          <article>
+            <span>来源</span>
+            <strong id="batchSource">-</strong>
+          </article>
+          <article>
+            <span>生成时间</span>
+            <strong id="batchGenerated">-</strong>
+          </article>
+          <article>
+            <span>结果数量</span>
+            <strong id="batchCount">-</strong>
+          </article>
+          <article>
+            <span>LRC 窗口</span>
+            <strong id="batchWindow">-</strong>
+          </article>
+        </section>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代碼</th>
+                <th>LRC Z-score</th>
+                <th>名稱</th>
+                <th>最新價</th>
+                <th>漲跌幅</th>
+                <th>成交量</th>
+                <th>MA200</th>
+                <th>RSI14</th>
+                <th>行業</th>
+              </tr>
+            </thead>
+            <tbody id="batchBody"></tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
