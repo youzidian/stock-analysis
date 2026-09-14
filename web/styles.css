@@ -44,16 +44,27 @@ body {
   gap: 8px;
 }
 
-.globalMarket {
+.navControls {
   display: flex;
   align-items: center;
-  grid-template-columns: none;
   gap: 8px;
   padding-bottom: 8px;
 }
 
+.globalMarket,
+.languageControl {
+  display: flex;
+  align-items: center;
+  grid-template-columns: none;
+  gap: 8px;
+}
+
 .globalMarket select {
   min-width: 110px;
+}
+
+.languageControl select {
+  min-width: 126px;
 }
 
 .navButton {
@@ -209,6 +220,35 @@ canvas {
   border-radius: 6px;
 }
 
+.chartCanvasWrap {
+  position: relative;
+}
+
+.chartTooltip {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  gap: 3px;
+  min-width: 168px;
+  padding: 9px 10px;
+  border: 1px solid #b9c4cf;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4px 14px rgba(23, 32, 42, 0.14);
+  color: var(--ink);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.chartTooltip[hidden] {
+  display: none;
+}
+
+.chartTooltip strong,
+.chartTooltip span {
+  color: var(--ink);
+}
+
 .lrcHeader {
   margin-top: 14px;
 }
@@ -272,6 +312,155 @@ canvas {
   min-width: 220px;
 }
 
+.maSlopeToolbar {
+  align-items: end;
+}
+
+.maSlopeControls {
+  display: grid;
+  grid-template-columns: 110px 100px 170px minmax(210px, 1fr) auto auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.slopeSliderControl {
+  position: relative;
+}
+
+.slopeSliderControl output {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.slopeSliderControl input[type="range"] {
+  min-height: 34px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.maSlopeControls input,
+.maSlopeControls select {
+  min-width: 0;
+  width: 100%;
+}
+
+.maSlopeCheck {
+  align-self: center;
+  margin-top: 19px;
+}
+
+.maSlopeMetrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.maSlopeMetrics article {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.maSlopeMetrics strong {
+  font-size: 20px;
+}
+
+.metricDivider {
+  height: 1px;
+  margin: 5px 0;
+  background: var(--line);
+}
+
+.maSlopeCharts {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.interactiveLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-height: 28px;
+  margin: -4px 0 8px 4px;
+}
+
+.legendToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.legendToggle:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+.legendToggle.muted {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+
+.legendLine {
+  width: 28px;
+  height: 2px;
+}
+
+#maSlopePriceChart {
+  aspect-ratio: 1200 / 500;
+}
+
+#maSlopeChart {
+  aspect-ratio: 1200 / 430;
+}
+
+.maSlopeStatsTable th,
+.maSlopeStatsTable td,
+.maSlopeRawTable th,
+.maSlopeRawTable td {
+  text-align: left;
+}
+
+.dataDisclosure {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.dataDisclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 14px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dataDisclosure summary::marker {
+  color: var(--muted);
+}
+
+.disclosureBody {
+  margin: 0 14px 14px;
+}
+
 .pager {
   display: flex;
   align-items: center;
@@ -312,6 +501,95 @@ canvas {
   font-size: 16px;
 }
 
+.screenerFilters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.rangeFilter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rangeFilter legend {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rangeFilter span {
+  font-size: 12px;
+}
+
+.screenerFilters label {
+  gap: 4px;
+  font-size: 12px;
+}
+
+.screenerFilters input,
+.screenerFilters select {
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.inlineCheck {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.inlineCheck input {
+  width: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  padding: 0;
+}
+
+.secondaryButton {
+  min-height: 34px;
+  padding: 0 12px;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.tableHeader {
+  margin-top: 4px;
+}
+
+.pageSizeControl {
+  display: flex;
+  align-items: center;
+  grid-template-columns: none;
+  gap: 6px;
+}
+
+.pageSizeControl select {
+  min-width: 76px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
 .tableWrap {
   overflow: auto;
   border: 1px solid var(--line);
@@ -338,12 +616,63 @@ td:first-child {
   text-align: left;
 }
 
+.batchPanel th,
+.batchPanel td {
+  text-align: left;
+}
+
 th {
   position: sticky;
   top: 0;
   background: var(--panel-2);
   color: var(--muted);
   font-weight: 600;
+}
+
+button.sortButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  color: inherit;
+  font-weight: 700;
+  text-align: right;
+}
+
+.batchPanel button.sortButton {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+th:first-child button.sortButton {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+button.sortButton::after {
+  content: "↕";
+  color: #9aa5b1;
+  font-size: 11px;
+}
+
+button.sortButton.active {
+  color: var(--accent);
+}
+
+button.sortButton.active[data-direction="asc"]::after {
+  content: "↑";
+  color: var(--accent);
+}
+
+button.sortButton.active[data-direction="desc"]::after {
+  content: "↓";
+  color: var(--accent);
 }
 
 .up {
@@ -366,6 +695,13 @@ th {
   background: #eef6f4;
 }
 
+.stockNameCell {
+  width: 220px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .emptyCell {
   text-align: left;
   color: var(--muted);
@@ -374,14 +710,25 @@ th {
 @media (max-width: 920px) {
   .toolbar,
   .controls,
-  .batchControls {
+  .batchControls,
+  .maSlopeControls {
     align-items: stretch;
     flex-direction: column;
   }
 
   .controls,
-  .batchControls {
+  .batchControls,
+  .maSlopeControls {
     width: 100%;
+  }
+
+  .maSlopeControls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .maSlopeCheck {
+    margin-top: 0;
   }
 
   input,
@@ -393,6 +740,25 @@ th {
   .metrics,
   .workspace,
   .batchSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .screenerFilters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tableHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .screenerFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .maSlopeControls {
     grid-template-columns: 1fr;
   }
 }

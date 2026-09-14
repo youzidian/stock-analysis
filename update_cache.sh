@@ -30,4 +30,5 @@ exec "$PYTHON_BIN" -m stock_analyzer.cache_builder \
   --symbols-file "$SYMBOLS_PATH" \
   --delay "$DELAY" \
   --markets "$MARKETS" \
-  --tags "$TAGS"
+  --tags "$TAGS" \
+  "$@"

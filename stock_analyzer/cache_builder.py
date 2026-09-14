@@ -16,6 +16,8 @@ from .data import BASE_PERIOD, MarketDataError, YahooChartProvider
 
 DEFAULT_SYMBOLS_FILE = Path("symbols.xlsx")
 DEFAULT_BATCH_OUTPUT = Path(".cache/batch_results.json")
+DEFAULT_FAILED_OUTPUT = Path(".cache/failed_symbols.json")
+MARKET_BENCHMARKS = {"US": "SPY", "HK": "2800.HK"}
 SIGMA_COLUMNS = [
     "代碼",
     "LRC Z-score",
@@ -30,6 +32,7 @@ SIGMA_COLUMNS = [
     "賣出價",
     "MA-MA200-日線",
     "RSI-RSI14-日線",
+    "MA-MA20-日線",
     "MA-MA50-日線",
     "營業利潤(TTM)",
     "買量",
@@ -65,6 +68,9 @@ class CacheResult:
     ok: bool
     rows: int = 0
     error: str = ""
+    action: str = ""
+    last_trading_date: str = ""
+    target_date: str = ""
 
 
 @dataclass(frozen=True)
@@ -311,22 +317,66 @@ def _dedupe(symbols: list[str]) -> list[str]:
     return output
 
 
+def market_target_dates(
+    records: list[SymbolRecord],
+    provider: YahooChartProvider,
+) -> tuple[dict[str, str], dict[str, str]]:
+    targets: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    markets = sorted({record.market.upper() for record in records if record.market})
+    for market in markets:
+        benchmark = MARKET_BENCHMARKS.get(market)
+        if not benchmark:
+            continue
+        try:
+            targets[market] = provider.latest_trading_date(benchmark)
+        except MarketDataError as exc:
+            errors[market] = str(exc)
+    return targets, errors
+
+
 def refresh_cache(
-    symbols: list[str],
+    records: list[SymbolRecord],
     cache_dir: Path,
     delay_seconds: float = 0.25,
     full_refresh: bool = False,
+    target_dates: dict[str, str] | None = None,
 ) -> list[CacheResult]:
     provider = YahooChartProvider(cache_dir=cache_dir, ttl_seconds=0)
     results: list[CacheResult] = []
 
-    for symbol in symbols:
+    for record in records:
+        symbol = record.symbol
+        target_date = (target_dates or {}).get(record.market.upper(), "")
         try:
-            rows, _ = provider.refresh_base_cache(symbol, full=full_refresh)
-            results.append(CacheResult(symbol, "3y", True, len(rows)))
+            refreshed = provider.update_base_cache(
+                symbol,
+                full=full_refresh,
+                target_date=target_date or None,
+            )
+            results.append(
+                CacheResult(
+                    symbol,
+                    BASE_PERIOD,
+                    True,
+                    len(refreshed.rows),
+                    action=refreshed.action,
+                    last_trading_date=refreshed.last_trading_date,
+                    target_date=target_date,
+                )
+            )
         except MarketDataError as exc:
-            results.append(CacheResult(symbol, "3y", False, error=str(exc)))
-        if delay_seconds > 0:
+            results.append(
+                CacheResult(
+                    symbol,
+                    BASE_PERIOD,
+                    False,
+                    error=str(exc),
+                    action="failed",
+                    target_date=target_date,
+                )
+            )
+        if delay_seconds > 0 and results[-1].action != "skipped":
             time.sleep(delay_seconds)
     return results
 
@@ -341,7 +391,7 @@ def build_batch_snapshot(
 
     for record in records:
         try:
-            rows, meta = provider.history_with_meta(record.symbol, BASE_PERIOD)
+            rows, meta = provider.cached_history_with_meta(record.symbol, BASE_PERIOD)
             snapshot = lrc_snapshot(rows, window=window)
             enriched = enrich_prices(rows)
             latest = enriched[-1]
@@ -424,8 +474,13 @@ def sigma_fields(
         "賣出價": _num(meta.get("ask")),
         "MA-MA200-日線": _num(latest.get("sma200")),
         "RSI-RSI14-日線": _num(latest.get("rsi14")),
+        "MA-MA20-日線": _num(latest.get("sma20")),
         "MA-MA50-日線": _num(latest.get("sma50")),
-        "營業利潤(TTM)": None,
+        "營業利潤(TTM)": _num(
+            meta.get("operatingProfit")
+            if meta.get("operatingProfit") is not None
+            else meta.get("operatingIncome")
+        ),
         "買量": None,
         "賣量": None,
         "開市": _num(latest.get("open")),
@@ -495,11 +550,81 @@ def write_report(results: list[CacheResult], report_path: Path) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with report_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["symbol", "period", "ok", "rows", "error"])
+        writer.writerow(
+            [
+                "symbol",
+                "period",
+                "ok",
+                "action",
+                "rows",
+                "last_trading_date",
+                "target_date",
+                "error",
+            ]
+        )
         for result in results:
             writer.writerow(
-                [result.symbol, result.period, result.ok, result.rows, result.error]
+                [
+                    result.symbol,
+                    result.period,
+                    result.ok,
+                    result.action,
+                    result.rows,
+                    result.last_trading_date,
+                    result.target_date,
+                    result.error,
+                ]
             )
+
+
+def load_failed_symbols(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    entries = payload.get("failed", []) if isinstance(payload, dict) else []
+    return {
+        str(entry.get("symbol", "")).strip().upper()
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("symbol")
+    }
+
+
+def write_failed_symbols(
+    results: list[CacheResult],
+    path: Path,
+    previous_symbols: set[str] | None = None,
+    attempted_symbols: set[str] | None = None,
+) -> None:
+    failures = {result.symbol: result for result in results if not result.ok}
+    remaining = set(previous_symbols or set())
+    remaining.difference_update(attempted_symbols or set())
+    remaining.update(failures)
+    entries = []
+    for symbol in sorted(remaining):
+        result = failures.get(symbol)
+        entries.append(
+            {
+                "symbol": symbol,
+                "error": result.error if result else "Not retried in this run",
+                "targetDate": result.target_date if result else "",
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "count": len(entries),
+                "failed": entries,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def main() -> None:
@@ -513,6 +638,17 @@ def main() -> None:
     parser.add_argument("--lrc-window", default=200, type=int)
     parser.add_argument("--full-refresh", action="store_true")
     parser.add_argument("--batch-output", default=str(DEFAULT_BATCH_OUTPUT))
+    parser.add_argument("--failed-output", default=str(DEFAULT_FAILED_OUTPUT))
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Only retry symbols recorded in the previous failed-symbol file",
+    )
+    parser.add_argument(
+        "--symbols",
+        default="",
+        help="Only update these comma-separated symbols",
+    )
     parser.add_argument(
         "--skip-batch-snapshot",
         action="store_true",
@@ -526,30 +662,67 @@ def main() -> None:
 
     markets = parse_filter_values(args.markets)
     tags = parse_filter_values(args.tags)
-    records = [
+    all_records = [
         record
         for record in load_symbol_records(symbols_path)
         if _matches_filters(record, markets=markets, tags=tags)
     ]
-    symbols = _dedupe([record.symbol for record in records])
-    if not symbols:
+    if not all_records:
         raise SystemExit(f"No symbols found in {symbols_path}")
 
+    failed_output = Path(args.failed_output)
+    previous_failed = load_failed_symbols(failed_output)
+    requested_symbols = parse_filter_values(args.symbols)
+    if args.retry_failed:
+        requested_symbols = previous_failed
+        if not requested_symbols:
+            print(f"No failed symbols found in {failed_output}")
+            return
+
+    records = [
+        record
+        for record in all_records
+        if not requested_symbols or record.symbol in requested_symbols
+    ]
+    if not records:
+        raise SystemExit("No requested symbols were found in the symbols file")
+
+    symbols = _dedupe([record.symbol for record in records])
     filter_parts = []
     if markets:
         filter_parts.append(f"markets={','.join(sorted(markets))}")
     if tags:
         filter_parts.append(f"tags={','.join(sorted(tags))}")
+    if requested_symbols:
+        filter_parts.append(f"symbols={','.join(sorted(requested_symbols))}")
     filter_text = f" ({'; '.join(filter_parts)})" if filter_parts else ""
-    print(f"Refreshing {len(symbols)} symbols{filter_text} into 3y base cache")
+    print(f"Refreshing {len(symbols)} symbols{filter_text} into {BASE_PERIOD} base cache")
+
+    target_provider = YahooChartProvider(cache_dir=Path(args.cache_dir), ttl_seconds=0)
+    target_dates, target_errors = market_target_dates(records, target_provider)
+    for market, target_date in sorted(target_dates.items()):
+        print(f"- {market} target trading date: {target_date}")
+    for market, error in sorted(target_errors.items()):
+        print(f"- {market} benchmark unavailable; checking all selected symbols: {error}")
+
     results = refresh_cache(
-        symbols, Path(args.cache_dir), args.delay, full_refresh=args.full_refresh
+        records,
+        Path(args.cache_dir),
+        args.delay,
+        full_refresh=args.full_refresh,
+        target_dates=target_dates,
     )
     write_report(results, Path(args.report))
+    write_failed_symbols(
+        results,
+        failed_output,
+        previous_symbols=previous_failed if requested_symbols else set(),
+        attempted_symbols=set(symbols),
+    )
 
     if not args.skip_batch_snapshot:
         snapshot = build_batch_snapshot(
-            records=records,
+            records=all_records,
             cache_dir=Path(args.cache_dir),
             window=args.lrc_window,
         )
@@ -557,8 +730,19 @@ def main() -> None:
 
     ok_count = sum(1 for result in results if result.ok)
     fail_count = len(results) - ok_count
+    action_counts = {
+        action: sum(1 for result in results if result.action == action)
+        for action in ("skipped", "updated", "rebuilt")
+    }
     batch_text = "" if args.skip_batch_snapshot else f" batch={args.batch_output}"
-    print(f"Done. success={ok_count} failed={fail_count} report={args.report}{batch_text}")
+    print(
+        "Done. "
+        f"success={ok_count} failed={fail_count} "
+        f"skipped={action_counts['skipped']} "
+        f"updated={action_counts['updated']} "
+        f"rebuilt={action_counts['rebuilt']} "
+        f"report={args.report} failed_report={failed_output}{batch_text}"
+    )
     if fail_count:
         print("Failed symbols:")
         for result in results:

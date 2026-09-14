@@ -1,189 +1,243 @@
-# 本地股市分析程序
+# Local Stock Analysis
 
-一个个人使用的本地 Web 工具，用日线行情生成价格走势、均线、RSI、52周区间和简单技术面评分。
+A personal, locally hosted web app for stock research. It uses daily market data to build price charts, moving averages, RSI, 52-week range metrics, Linear Regression Channel Z-scores, Sigma Model screening, and MA Slope analysis.
 
-## 功能
+This project is designed to run on Linux. It also works in WSL, but the commands below avoid machine-specific Windows paths.
 
-- 本地部署：使用 Python 标准库启动 HTTP 服务
-- 股票查询：默认通过 Yahoo Finance chart 接口读取日线数据
-- 本地缓存：相同股票和周期会缓存约 15 分钟，也可以批量预先缓存
-- 技术指标：SMA20、SMA50、SMA200、RSI14、成交量均线
-- 页面分析：关键指标、价格图、信号解释、最近交易日表格
+## Features
 
-## 运行
+- Local web server using Python's standard library
+- Daily OHLCV data from Yahoo Finance's chart endpoint
+- Ten-year local base cache per symbol
+- Incremental daily cache updates when possible
+- Sigma Model precomputed cross-section from `symbols.xlsx`
+- Single-symbol analysis with price, MA, RSI, LRC, signals, and paginated history
+- MA Slope analysis with configurable MA periods and slope lookback
 
-当前机器没有把 Python 加到 PATH，可以直接用 Codex 自带 Python：
+## Requirements
 
-```powershell
-& 'C:\Users\cwu\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' app.py
+- Linux or WSL
+- Python 3.10 or newer
+- Network access to Yahoo Finance for cache updates
+
+No npm build step is required. The frontend is plain HTML, CSS, and JavaScript.
+
+## Quick Start
+
+From the project directory:
+
+```sh
+python3 --version
+sh run.sh
 ```
 
-然后打开：
+Then open:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-如果你的电脑已经安装了 Python，也可以：
-
-```powershell
-python app.py
-```
-
-### WSL 运行
-
-在 WSL 里进入项目目录：
+Run in the background:
 
 ```sh
-cd /mnt/d/workspace/finance/stock_analysis
+sh run.sh start
 ```
 
-确认 Python 可用：
+Check status, restart, or stop:
 
 ```sh
-python3 --version
+sh run.sh status
+sh run.sh restart
+sh run.sh stop
 ```
 
-启动服务：
-
-```sh
-sh run.sh
-```
-
-然后在 Windows 或 WSL 浏览器打开：
+Background logs are written to:
 
 ```text
-http://localhost:8765
+.cache/server.log
 ```
 
-如果 Windows 浏览器访问不到 WSL 里的服务，可以改成监听所有本地网卡：
+If you want the app to listen on all network interfaces, use:
 
 ```sh
-HOST=0.0.0.0 sh run.sh
+HOST=0.0.0.0 sh run.sh start
 ```
 
-## 股票代码示例
+You can also choose another port:
 
-- 美股：`AAPL`、`MSFT`、`NVDA`
-- 港股：Yahoo 常用后缀是 `.HK`，例如 `0700.HK`
+```sh
+PORT=9000 sh run.sh start
+```
 
-## 预先缓存股票数据
+If Python is installed at a non-standard path:
 
-批量缓存不会自动下载全球所有股票。它会读取 `symbols.xlsx` 里的股票池，然后逐个请求 Yahoo Finance 并写入 `.cache/`。如果没有 `symbols.xlsx`，`update_cache.sh` 会退回读取 `symbols.txt`。
+```sh
+PYTHON=/path/to/python3 sh run.sh start
+```
 
-编辑股票池：
+## Symbols File
+
+The stock universe is managed in:
 
 ```text
 symbols.xlsx
 ```
 
-Excel 使用不同工作表区分市场，例如：
+Each worksheet represents a market, for example:
 
 ```text
 US
 HK
 ```
 
-每个工作表暂时只需要三列：
+Each worksheet should contain these columns. Column order does not matter because the loader reads by column name:
 
 ```text
-symbol | name | enabled
+symbol | name | industry | enabled
 ```
 
-`enabled` 填 `FALSE`、`0`、`no`、`disabled` 或 `停用` 时，该行会被跳过。示例：
+Rows are skipped when `enabled` is one of:
+
+```text
+FALSE, 0, no, disabled
+```
+
+Example:
 
 ```text
 US sheet
-symbol   name          enabled
-AAPL     Apple         TRUE
-MSFT     Microsoft     TRUE
-SPY      S&P 500 ETF   TRUE
+symbol   name          industry             enabled
+AAPL     Apple         Consumer Electronics TRUE
+MSFT     Microsoft     Software             TRUE
+SPY      S&P 500 ETF   ETF                  TRUE
 
 HK sheet
-symbol   name          enabled
-0700.HK  Tencent       TRUE
-9988.HK  Alibaba HK    TRUE
+symbol   name          industry   enabled
+0700.HK  Tencent       Internet   TRUE
+9988.HK  Alibaba HK    E-commerce TRUE
 ```
 
-在 WSL 里手动刷新缓存：
+Yahoo Finance uses the `.HK` suffix for many Hong Kong listings, such as `0700.HK`.
+
+## Update The Cache
+
+Refresh all enabled symbols:
 
 ```sh
-cd /mnt/d/workspace/finance/stock_analysis
 sh update_cache.sh
 ```
 
-指定旧的文本股票池也可以：
+The update process:
+
+- Reads enabled symbols from `symbols.xlsx`
+- Maintains one ten-year base cache per symbol under `.cache/prices/`
+- Skips symbols that already match the target trading date
+- Downloads a recent delta for stale symbols when possible
+- Rebuilds missing, damaged, or outdated cache files
+- Retries temporary errors such as 429, 500, 502, 503, 504, network errors, and timeouts
+- Preserves the last successful cache when an update fails
+- Writes a precomputed Sigma Model snapshot to `.cache/batch_results.json`
+
+Useful update commands:
 
 ```sh
-SYMBOLS_FILE=symbols.txt sh update_cache.sh
-```
+# Only update selected symbols
+sh update_cache.sh --symbols AAPL,MSFT,0700.HK
 
-默认每日更新会维护每只股票一份 3 年基础日线缓存。Sigma Model 只生成最新交易日的一份预计算截面；单股分析页的 3 个月、6 个月、1 年等周期会直接从这份 3 年缓存里本地切片。
+# Retry only symbols that failed in the previous run
+sh update_cache.sh --retry-failed
 
-只更新港股：
+# Force a full rebuild for selected symbols
+sh update_cache.sh --full-refresh --symbols AAPL
 
-```sh
-MARKETS=HK sh update_cache.sh
-```
-
-只更新美股：
-
-```sh
+# Only update one market
 MARKETS=US sh update_cache.sh
+MARKETS=HK sh update_cache.sh
+
+# Increase or reduce request delay
+DELAY=0.5 sh update_cache.sh
 ```
 
-网页里的 `Sigma Model` 页面也使用同一份 `symbols.xlsx`。顶部有全局市场下拉框，例如：
-
-- 市场填 `HK`：只计算港股
-- 市场填 `US`：只计算美股
-- 市场留空：计算所有工作表里的股票
-
-Sigma Model 结果里的 `LRC Z-score` 来自 200 日 Linear Regression Channel：
-
-```text
-(最新收盘价 - 线性回归趋势值) / 回归残差标准差
-```
-
-每日更新会预先生成：
-
-```text
-.cache/batch_results.json
-```
-
-其中包含 `代碼`、`LRC Z-score`、`名稱`、`最新價`、`漲跌額`、`漲跌幅`、`成交量`、`成交額`、`MA200`、`RSI14`、`MA50`、`開市`、`前收`、`最高`、`最低`、`量比`、`振幅`、多周期涨跌幅等字段。当前 Yahoo chart 数据源拿不到的盘口、行业和部分财务字段会保留为空值，后续接入更完整数据源后可以直接填充。
-
-更新结果会写入：
+Update reports are written to:
 
 ```text
 .cache/cache_report.csv
+.cache/failed_symbols.json
 ```
 
-### 每天自动更新
+If you need to rebuild one local slice manually:
 
-在 WSL 里打开 crontab：
+```sh
+rm .cache/prices/VT.json
+sh update_cache.sh --symbols VT
+```
+
+## Daily Automation
+
+On Linux, edit the user's crontab:
 
 ```sh
 crontab -e
 ```
 
-例如每天香港时间早上 7:30 更新一次：
+Example: update every day at 07:30 local system time:
 
 ```cron
-30 7 * * * cd /mnt/d/workspace/finance/stock_analysis && /bin/sh update_cache.sh >> .cache/cron.log 2>&1
+30 7 * * * cd /path/to/stock_analysis && mkdir -p .cache && /usr/bin/flock -n .cache/update_cache.lock /bin/sh update_cache.sh >> .cache/cron.log 2>&1
 ```
 
-如果你用的是 Windows 任务计划程序，也可以让它每天执行：
+`flock` prevents a second update from starting while the previous one is still running.
+
+Make sure cron is running on the target machine. The exact command depends on the Linux distribution, but common options are:
+
+```sh
+sudo systemctl status cron
+sudo systemctl start cron
+```
+
+or:
+
+```sh
+sudo service cron status
+sudo service cron start
+```
+
+## Analysis Logic
+
+The Sigma Model `LRC Z-score` uses a 200-day Linear Regression Channel:
 
 ```text
-wsl -e sh -lc "cd /mnt/d/workspace/finance/stock_analysis && sh update_cache.sh"
+(latest adjusted close - regression trend value) / regression residual standard deviation
 ```
 
-## 测试
+LRC uses adjusted close to reduce discontinuities caused by dividends and splits. The displayed latest price, open, high, low, and daily change still use the raw Yahoo OHLC values.
 
-```powershell
-& 'C:\Users\cwu\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m unittest discover -s tests
+MA Slope uses the local ten-year cache. Changing MA periods or slope lookback does not request Yahoo again.
+
+Slope formula:
+
+```text
+(SMA_t / SMA_(t-N) - 1) * 100 / N
 ```
 
-## 说明
+The unit is `% per trading day`.
 
-这个工具只做研究和记录，不构成投资建议。Yahoo Finance 的非官方接口适合个人轻量使用；如果之后要接入稳定生产数据源，可以替换 `stock_analyzer/data.py` 里的 provider。
+## Tests
+
+Run the test suite:
+
+```sh
+python3 -m unittest discover -s tests
+```
+
+Run a JavaScript syntax check if Node.js is available:
+
+```sh
+node --check web/app.js
+```
+
+## Notes
+
+This tool is for research and record keeping only. It is not investment advice.
+
+Yahoo Finance's chart endpoint is unofficial and best suited for personal, lightweight use. For a production-quality data feed, replace the provider implementation in `stock_analyzer/data.py`.

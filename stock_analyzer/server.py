@@ -1,15 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
+from datetime import date, timedelta
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .analysis import build_summary
+from .analysis import build_ma_slope_summary, build_summary
 from .cache_builder import build_batch_snapshot, load_symbol_records, parse_filter_values
-from .data import MarketDataError, YahooChartProvider
+from .data import BASE_PERIOD, MarketDataError, YahooChartProvider
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +31,9 @@ class StockAnalysisHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/batch":
             self._handle_batch(parsed.query)
             return
+        if parsed.path == "/api/ma-slope":
+            self._handle_ma_slope(parsed.query)
+            return
         if parsed.path == "/health":
             self._json({"ok": True})
             return
@@ -41,11 +45,13 @@ class StockAnalysisHandler(SimpleHTTPRequestHandler):
         period = params.get("period", ["1y"])[0]
         try:
             rows = PROVIDER.history(symbol, period)
-            self._json(build_summary(symbol, rows))
+            payload = build_summary(symbol, rows)
+            payload["name"] = _symbol_name(symbol)
+            self._json(payload)
         except (MarketDataError, ValueError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:
-            self._json({"error": f"分析失败: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._json({"error": f"Analysis failed: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_batch(self, query: str) -> None:
         params = parse_qs(query)
@@ -91,7 +97,47 @@ class StockAnalysisHandler(SimpleHTTPRequestHandler):
                 }
             )
         except Exception as exc:
-            self._json({"error": f"批量分析失败: {exc}"}, HTTPStatus.BAD_REQUEST)
+            self._json({"error": f"Batch analysis failed: {exc}"}, HTTPStatus.BAD_REQUEST)
+
+    def _handle_ma_slope(self, query: str) -> None:
+        params = parse_qs(query)
+        symbol = params.get("symbol", ["QQQ"])[0].strip().upper()
+        display_period = params.get("period", ["5y"])[0]
+        display_years = {"1y": 1, "2y": 2, "3y": 3, "5y": 5, "10y": 10}
+        if display_period not in display_years:
+            self._json({"error": "Period only supports 1y, 2y, 3y, 5y, or 10y"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            periods = sorted(
+                {
+                    int(value.strip())
+                    for value in params.get("mas", ["20,50,200"])[0].split(",")
+                    if value.strip()
+                }
+            )
+            slope_window = int(params.get("slopeWindow", ["5"])[0])
+            if not periods or any(period <= 0 or period > 500 for period in periods):
+                raise ValueError("MA periods must be positive integers from 1 to 500")
+            if slope_window < 1 or slope_window > 30:
+                raise ValueError("Slope lookback must be between 1 and 30 trading days")
+            rows = PROVIDER.history(symbol, BASE_PERIOD)
+            years = display_years[display_period]
+            latest_date = date.fromisoformat(str(rows[-1]["date"]))
+            display_start_date = latest_date - timedelta(days=int(years * 365.25))
+            payload = build_ma_slope_summary(
+                symbol,
+                rows,
+                periods,
+                slope_window,
+                display_start_date=display_start_date,
+            )
+            payload["name"] = _symbol_name(symbol)
+            payload["displayPeriod"] = display_period
+            self._json(payload)
+        except (MarketDataError, ValueError) as exc:
+            self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except Exception as exc:
+            self._json({"error": f"MA Slope analysis failed: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _compute_batch_live(
         self,
@@ -135,6 +181,10 @@ class StockAnalysisHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local stock analysis app")
@@ -163,3 +213,14 @@ def _matches_record_market(market: str, markets: set[str] | None) -> bool:
     if not markets:
         return True
     return market.upper() in markets
+
+
+def _symbol_name(symbol: str) -> str:
+    symbols_path = ROOT / "symbols.xlsx"
+    if not symbols_path.exists():
+        return ""
+    normalized = symbol.strip().upper()
+    for record in load_symbol_records(symbols_path):
+        if record.symbol == normalized:
+            return record.name
+    return ""

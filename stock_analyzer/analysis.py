@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from math import isnan
 from statistics import mean
 
@@ -114,6 +115,9 @@ def build_summary(symbol: str, rows: list[PriceRow]) -> dict[str, object]:
         raise ValueError("No price rows available")
 
     enriched = enrich_prices(rows)
+    lrc_z_scores = rolling_lrc_z_scores(rows)
+    for row, z_score in zip(enriched, lrc_z_scores):
+        row["lrc_zscore"] = z_score
     latest = enriched[-1]
     closes = [_safe_float(row["close"]) for row in enriched]
     highs = [_safe_float(row["high"]) for row in enriched]
@@ -142,13 +146,162 @@ def build_summary(symbol: str, rows: list[PriceRow]) -> dict[str, object]:
     }
 
 
+def build_ma_slope_summary(
+    symbol: str,
+    rows: list[PriceRow],
+    periods: list[int],
+    slope_window: int,
+    display_rows: int | None = None,
+    display_start_date: date | None = None,
+) -> dict[str, object]:
+    if not rows:
+        raise ValueError("No price rows available")
+    if not periods or any(period <= 0 for period in periods):
+        raise ValueError("MA periods must be positive integers")
+    if slope_window <= 0:
+        raise ValueError("Slope window must be positive")
+
+    normalized_periods = sorted(set(periods))
+    closes = [_safe_float(row["close"]) for row in rows]
+    moving_averages = {
+        period: sma(closes, period) for period in normalized_periods
+    }
+    slopes: dict[int, list[float | None]] = {}
+    for period in normalized_periods:
+        values = moving_averages[period]
+        period_slopes: list[float | None] = []
+        for idx, value in enumerate(values):
+            previous_idx = idx - slope_window
+            previous = values[previous_idx] if previous_idx >= 0 else None
+            period_slopes.append(
+                ((value / previous - 1) * 100 / slope_window)
+                if value is not None and previous not in (None, 0)
+                else None
+            )
+        slopes[period] = period_slopes
+
+    if display_start_date is not None:
+        start_idx = next(
+            (
+                idx
+                for idx, row in enumerate(rows)
+                if date.fromisoformat(str(row["date"])) >= display_start_date
+            ),
+            len(rows),
+        )
+    else:
+        start_idx = max(0, len(rows) - display_rows) if display_rows else 0
+    if start_idx >= len(rows):
+        raise ValueError("No data in selected display window")
+    output_rows: list[dict[str, object]] = []
+    for idx, row in enumerate(rows[start_idx:], start=start_idx):
+        output_rows.append(
+            {
+                "date": row["date"],
+                "open": _safe_float(row["open"]),
+                "high": _safe_float(row["high"]),
+                "low": _safe_float(row["low"]),
+                "close": closes[idx],
+                "volume": _safe_float(row.get("volume", 0)),
+                "mas": {
+                    str(period): moving_averages[period][idx]
+                    for period in normalized_periods
+                },
+                "slopes": {
+                    str(period): slopes[period][idx]
+                    for period in normalized_periods
+                },
+            }
+        )
+
+    latest = output_rows[-1]
+    metrics = []
+    statistics = []
+    for period in normalized_periods:
+        key = str(period)
+        ma_value = latest["mas"][key]
+        slope_value = latest["slopes"][key]
+        valid_slopes = [
+            (str(row["date"]), float(row["slopes"][key]))
+            for row in output_rows
+            if row["slopes"][key] is not None
+        ]
+        slope_values = [value for _, value in valid_slopes]
+        percentile = (
+            sum(value < float(slope_value) for value in slope_values)
+            / len(slope_values)
+            * 100
+            if slope_value is not None and slope_values
+            else None
+        )
+        metrics.append(
+            {
+                "period": period,
+                "ma": ma_value,
+                "priceVsMaPct": (
+                    (float(ma_value) / float(latest["close"]) - 1) * 100
+                    if ma_value not in (None, 0) and latest["close"]
+                    else None
+                ),
+                "slope": slope_value,
+                "percentile": percentile,
+            }
+        )
+        statistics.append(
+            {
+                "period": period,
+                "current": slope_value,
+                "mean": mean(slope_values) if slope_values else None,
+                "stddev": (
+                    (
+                        sum(
+                            (value - mean(slope_values)) ** 2
+                            for value in slope_values
+                        )
+                        / (len(slope_values) - 1)
+                    )
+                    ** 0.5
+                    if len(slope_values) > 1
+                    else None
+                ),
+                "min": min(slope_values) if slope_values else None,
+                "minDate": (
+                    min(valid_slopes, key=lambda item: item[1])[0]
+                    if valid_slopes
+                    else None
+                ),
+                "max": max(slope_values) if slope_values else None,
+                "negativePct": (
+                    sum(value < 0 for value in slope_values)
+                    / len(slope_values)
+                    * 100
+                    if slope_values
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "symbol": symbol.upper(),
+        "periods": normalized_periods,
+        "slopeWindow": slope_window,
+        "latest": {
+            "date": latest["date"],
+            "close": latest["close"],
+        },
+        "metrics": metrics,
+        "statistics": statistics,
+        "rows": output_rows,
+    }
+
+
 def lrc_snapshot(rows: list[PriceRow], window: int = 200) -> LrcSnapshot:
     if window < 3:
         raise ValueError("LRC window must be at least 3")
     if len(rows) < window:
         raise ValueError(f"LRC needs at least {window} rows")
 
-    closes = [_safe_float(row["close"]) for row in rows[-window:]]
+    closes = [_lrc_close(row) for row in rows[-window:]]
     newest_first = list(reversed(closes))
     xs = list(range(1, window + 1))
     x_mean = mean(xs)
@@ -182,6 +335,22 @@ def lrc_snapshot(rows: list[PriceRow], window: int = 200) -> LrcSnapshot:
     )
 
 
+def rolling_lrc_z_scores(
+    rows: list[PriceRow], window: int = 200
+) -> list[float | None]:
+    if window < 3:
+        raise ValueError("LRC window must be at least 3")
+
+    output: list[float | None] = [None] * len(rows)
+    for idx in range(window - 1, len(rows)):
+        try:
+            output[idx] = lrc_snapshot(rows[: idx + 1], window=window).z_score
+        except ValueError as exc:
+            if "standard deviation is zero" not in str(exc):
+                raise
+    return output
+
+
 def lrc_channel(rows: list[PriceRow], window: int = 200) -> list[dict[str, object]]:
     if window < 3:
         raise ValueError("LRC window must be at least 3")
@@ -189,7 +358,7 @@ def lrc_channel(rows: list[PriceRow], window: int = 200) -> list[dict[str, objec
         raise ValueError(f"LRC needs at least {window} rows")
 
     window_rows = rows[-window:]
-    closes_oldest_first = [_safe_float(row["close"]) for row in window_rows]
+    closes_oldest_first = [_lrc_close(row) for row in window_rows]
     newest_first = list(reversed(closes_oldest_first))
     xs = list(range(1, window + 1))
     x_mean = mean(xs)
@@ -238,10 +407,10 @@ def _build_signals(
         trend_up = last_close > sma20_value > sma50_value
         signals.append(
             Signal(
-                "短中期趋势",
-                "多头排列" if trend_up else "未确认",
+                "Short/Mid-Term Trend",
+                "Bullish alignment" if trend_up else "Not confirmed",
                 "positive" if trend_up else "neutral",
-                f"收盘价 {last_close:.2f}，20日均线 {sma20_value:.2f}，50日均线 {sma50_value:.2f}",
+                f"Close {last_close:.2f}, 20-day MA {sma20_value:.2f}, 50-day MA {sma50_value:.2f}",
             )
         )
 
@@ -249,33 +418,33 @@ def _build_signals(
         above = last_close > sma200_value
         signals.append(
             Signal(
-                "长期位置",
-                "站上200日线" if above else "低于200日线",
+                "Long-Term Position",
+                "Above 200-day MA" if above else "Below 200-day MA",
                 "positive" if above else "negative",
-                f"200日均线 {sma200_value:.2f}",
+                f"200-day MA {sma200_value:.2f}",
             )
         )
 
     if rsi_value is not None:
         if rsi_value >= 70:
             sentiment = "negative"
-            value = "偏热"
+            value = "Hot"
         elif rsi_value <= 30:
             sentiment = "positive"
-            value = "偏冷"
+            value = "Cold"
         else:
             sentiment = "neutral"
-            value = "中性"
-        signals.append(Signal("RSI(14)", value, sentiment, f"当前 RSI {rsi_value:.1f}"))
+            value = "Neutral"
+        signals.append(Signal("RSI(14)", value, sentiment, f"Current RSI {rsi_value:.1f}"))
 
     if volume_avg:
         elevated = volume > volume_avg * 1.5
         signals.append(
             Signal(
-                "成交量",
-                "明显放量" if elevated else "常规",
+                "Volume",
+                "Elevated" if elevated else "Normal",
                 "positive" if elevated else "neutral",
-                f"最新成交量是20日均量的 {volume / volume_avg:.2f} 倍",
+                f"Latest volume is {volume / volume_avg:.2f}x the 20-day average",
             )
         )
 
@@ -283,14 +452,14 @@ def _build_signals(
         distance_from_low = ((last_close - low_52w) / low_52w) * 100
         if drawdown > -8:
             sentiment = "positive"
-            value = "接近高位"
+            value = "Near high"
         elif distance_from_low < 12:
             sentiment = "negative"
-            value = "接近低位"
+            value = "Near low"
         else:
             sentiment = "neutral"
-            value = "区间中部"
-        signals.append(Signal("52周区间", value, sentiment, f"距52周高点 {drawdown:.1f}%"))
+            value = "Mid range"
+        signals.append(Signal("52W Range", value, sentiment, f"{drawdown:.1f}% from the 52-week high"))
 
     return signals
 
@@ -304,19 +473,23 @@ def _score(signals: list[Signal]) -> dict[str, object]:
             points -= 10
     points = max(0, min(100, points))
     if points >= 70:
-        label = "强势观察"
+        label = "Strong watch"
     elif points >= 55:
-        label = "偏强"
+        label = "Moderately strong"
     elif points >= 40:
-        label = "中性"
+        label = "Neutral"
     else:
-        label = "偏弱"
+        label = "Weak"
     return {"value": points, "label": label}
 
 
 def _safe_float(value: object) -> float:
     number = float(value or 0)
     return 0.0 if isnan(number) else number
+
+
+def _lrc_close(row: PriceRow) -> float:
+    return _safe_float(row.get("adj_close", row["close"]))
 
 
 def _safe_optional_float(value: object) -> float | None:

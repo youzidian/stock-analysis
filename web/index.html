@@ -1,71 +1,83 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>本地股市分析</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>Local Stock Analysis</title>
+    <link rel="stylesheet" href="/styles.css?v=20260914-i18n" />
   </head>
   <body>
     <main class="shell">
-      <nav class="topNav" aria-label="页面导航">
+      <nav class="topNav" aria-label="Page navigation">
         <div class="navTabs">
-          <button class="navButton active" type="button" data-view="singleView">单股分析</button>
-          <button class="navButton" type="button" data-view="batchView">Sigma Model</button>
+          <button class="navButton active" type="button" data-view="batchView">Sigma Model</button>
+          <button class="navButton" type="button" data-view="singleView">Single Stock</button>
+          <button class="navButton" type="button" data-view="maSlopeView">MA Slope</button>
         </div>
-        <label class="globalMarket">
-          <span>全局市场</span>
-          <select id="globalMarket">
-            <option value="">全部</option>
-            <option value="US">US</option>
-            <option value="HK">HK</option>
-          </select>
-        </label>
+        <div class="navControls">
+          <label class="languageControl">
+            <span>Language</span>
+            <select id="languageInput">
+              <option value="en">English</option>
+              <option value="zh-Hant">繁體中文</option>
+            </select>
+          </label>
+          <label class="globalMarket">
+            <span>Global Market</span>
+            <select id="globalMarket">
+              <option value="">All</option>
+              <option value="US">US</option>
+              <option value="HK">HK</option>
+            </select>
+          </label>
+        </div>
       </nav>
 
-      <div id="singleView" class="view active">
-      <section class="toolbar" aria-label="分析控制">
+      <div id="singleView" class="view">
+      <section class="toolbar" aria-label="Analysis controls">
         <div>
-          <h1>本地股市分析</h1>
-          <p id="status">输入代码后读取日线数据并生成技术面摘要。</p>
+          <h1 id="analysisTitle">Local Stock Analysis</h1>
+          <p id="status">Enter a symbol to load daily data and generate a technical summary.</p>
         </div>
         <form id="searchForm" class="controls">
           <label>
-            <span>股票代码</span>
+            <span>Symbol</span>
             <input id="symbolInput" name="symbol" value="AAPL" autocomplete="off" />
           </label>
           <label>
-            <span>周期</span>
+            <span>Period</span>
             <select id="periodInput" name="period">
-              <option value="3mo">3个月</option>
-              <option value="6mo">6个月</option>
-              <option value="1y" selected>1年</option>
-              <option value="2y">2年</option>
-              <option value="3y">3年</option>
+              <option value="3mo">3 months</option>
+              <option value="6mo">6 months</option>
+              <option value="1y" selected>1 year</option>
+              <option value="2y">2 years</option>
+              <option value="3y">3 years</option>
+              <option value="5y">5 years</option>
+              <option value="10y">10 years</option>
             </select>
           </label>
-          <button type="submit">分析</button>
+          <button type="submit">Analyze</button>
         </form>
       </section>
 
-      <section class="metrics" aria-label="关键指标">
+      <section class="metrics" aria-label="Key metrics">
         <article>
-          <span>最新收盘</span>
+          <span>Latest Close</span>
           <strong id="latestClose">-</strong>
           <small id="latestDate">-</small>
         </article>
         <article>
-          <span>区间收益</span>
+          <span>Period Return</span>
           <strong id="periodReturn">-</strong>
-          <small>按所选周期计算</small>
+          <small>Based on the selected period</small>
         </article>
         <article>
-          <span>52周回撤</span>
+          <span>52W Drawdown</span>
           <strong id="drawdown">-</strong>
           <small id="range52w">-</small>
         </article>
         <article>
-          <span>综合评分</span>
+          <span>Composite Score</span>
           <strong id="score">-</strong>
           <small id="scoreLabel">-</small>
         </article>
@@ -74,20 +86,26 @@
       <section class="workspace">
         <div class="chartPanel">
           <div class="panelHeader">
-            <h2 id="chartTitle">价格走势</h2>
+            <h2 id="chartTitle">Price Trend</h2>
             <span id="chartHint">Close / SMA20 / SMA50</span>
           </div>
-          <canvas id="priceChart" width="1100" height="460"></canvas>
+          <div class="chartCanvasWrap">
+            <canvas id="priceChart" width="1100" height="460"></canvas>
+            <div id="priceTooltip" class="chartTooltip" hidden></div>
+          </div>
           <div class="panelHeader lrcHeader">
             <h2 id="lrcTitle">LRC Tunnel</h2>
             <span>Trend / ±2σ / ±4σ</span>
           </div>
-          <canvas id="lrcChart" width="1100" height="460"></canvas>
+          <div class="chartCanvasWrap">
+            <canvas id="lrcChart" width="1100" height="460"></canvas>
+            <div id="lrcTooltip" class="chartTooltip" hidden></div>
+          </div>
         </div>
         <aside class="signalsPanel">
           <div class="panelHeader">
-            <h2>信号</h2>
-            <span>仅供研究</span>
+            <h2>Signals</h2>
+            <span>Research only</span>
           </div>
           <div id="signals" class="signals"></div>
         </aside>
@@ -95,26 +113,27 @@
 
       <section class="tablePanel">
         <div class="panelHeader">
-          <h2>最近交易日</h2>
+          <h2>Recent Trading Days</h2>
           <div class="pager">
             <span id="rowCount">-</span>
-            <button id="prevHistory" type="button" aria-label="上一页">‹</button>
+            <button id="prevHistory" type="button" aria-label="Previous page">‹</button>
             <span id="historyPage">-</span>
-            <button id="nextHistory" type="button" aria-label="下一页">›</button>
+            <button id="nextHistory" type="button" aria-label="Next page">›</button>
           </div>
         </div>
         <div class="tableWrap">
           <table>
             <thead>
               <tr>
-                <th>日期</th>
-                <th>开盘</th>
-                <th>最高</th>
-                <th>最低</th>
-                <th>收盘</th>
-                <th>涨跌幅</th>
+                <th>Date</th>
+                <th>LRC Z-score</th>
+                <th>Open</th>
+                <th>High</th>
+                <th>Low</th>
+                <th>Close</th>
+                <th>Change %</th>
                 <th>RSI</th>
-                <th>成交量</th>
+                <th>Volume</th>
               </tr>
             </thead>
             <tbody id="historyBody"></tbody>
@@ -123,52 +142,145 @@
       </section>
       </div>
 
-      <div id="batchView" class="view">
+      <div id="batchView" class="view active">
       <section class="batchPanel">
         <div class="panelHeader">
           <div>
             <h2>Sigma Model</h2>
-            <span id="batchStatus">读取每日预计算的 LRC Z-score</span>
+            <span id="batchStatus">Load the daily precomputed LRC Z-score snapshot</span>
           </div>
           <form id="batchForm" class="batchControls">
             <label>
-              <span>搜索</span>
-              <input id="batchSearch" name="search" placeholder="代码 / 名称 / 行业" />
+              <span>Search</span>
+              <input id="batchSearch" name="search" placeholder="Symbol / name / industry" />
             </label>
-            <button type="submit">运行</button>
+            <button type="submit">Run</button>
           </form>
         </div>
-        <section class="batchSummary" aria-label="批量摘要">
+        <section class="batchSummary" aria-label="Batch summary">
           <article>
-            <span>来源</span>
+            <span>Source</span>
             <strong id="batchSource">-</strong>
           </article>
           <article>
-            <span>生成时间</span>
+            <span>Generated At</span>
             <strong id="batchGenerated">-</strong>
           </article>
           <article>
-            <span>结果数量</span>
+            <span>Result Count</span>
             <strong id="batchCount">-</strong>
           </article>
           <article>
-            <span>LRC 窗口</span>
+            <span>LRC Window</span>
             <strong id="batchWindow">-</strong>
           </article>
         </section>
+        <section class="screenerFilters" aria-label="Sigma Model filters">
+          <label>
+            <span>Industry</span>
+            <select id="batchIndustryFilter">
+              <option value="">All Industries</option>
+            </select>
+          </label>
+          <fieldset class="rangeFilter">
+            <legend>Z-score</legend>
+            <input id="batchZMin" type="number" step="0.1" placeholder="Min" aria-label="Minimum Z-score" />
+            <span>to</span>
+            <input id="batchZMax" type="number" step="0.1" placeholder="Max" aria-label="Maximum Z-score" />
+          </fieldset>
+          <fieldset class="rangeFilter">
+            <legend>RSI</legend>
+            <input id="batchRsiMin" type="number" step="1" placeholder="Min" aria-label="Minimum RSI" />
+            <span>to</span>
+            <input id="batchRsiMax" type="number" step="1" placeholder="Max" aria-label="Maximum RSI" />
+          </fieldset>
+          <fieldset class="rangeFilter">
+            <legend>Market Cap</legend>
+            <input id="batchMarketCapMin" type="number" step="1" placeholder="Min" aria-label="Minimum market cap" />
+            <span>to</span>
+            <input id="batchMarketCapMax" type="number" step="1" placeholder="Max" aria-label="Maximum market cap" />
+          </fieldset>
+          <label>
+            <span>Price / MA20</span>
+            <select id="batchPriceMa20Relation">
+              <option value="">Any relation</option>
+              <option value="above">Price above MA20</option>
+              <option value="below">Price below MA20</option>
+              <option value="equal">Price near MA20</option>
+            </select>
+          </label>
+          <label>
+            <span>Price / MA50</span>
+            <select id="batchPriceMa50Relation">
+              <option value="">Any relation</option>
+              <option value="above">Price above MA50</option>
+              <option value="below">Price below MA50</option>
+              <option value="equal">Price near MA50</option>
+            </select>
+          </label>
+          <label>
+            <span>Price / MA200</span>
+            <select id="batchPriceMa200Relation">
+              <option value="">Any relation</option>
+              <option value="above">Price above MA200</option>
+              <option value="below">Price below MA200</option>
+              <option value="equal">Price near MA200</option>
+            </select>
+          </label>
+          <label>
+            <span>MA50 / MA200</span>
+            <select id="batchMa50Ma200Relation">
+              <option value="">Any relation</option>
+              <option value="above">MA50 above MA200</option>
+              <option value="below">MA50 below MA200</option>
+              <option value="equal">MA50 near MA200</option>
+            </select>
+          </label>
+          <fieldset class="rangeFilter">
+            <legend>Operating Profit TTM</legend>
+            <input id="batchOperatingProfitMin" type="number" step="1" placeholder="Min" aria-label="Minimum operating profit TTM" />
+            <span>to</span>
+            <input id="batchOperatingProfitMax" type="number" step="1" placeholder="Max" aria-label="Maximum operating profit TTM" />
+          </fieldset>
+          <label class="inlineCheck">
+            <input id="batchShowErrors" type="checkbox" />
+            <span>Show failed rows</span>
+          </label>
+          <button id="batchClearFilters" type="button" class="secondaryButton">Clear</button>
+        </section>
+        <div class="panelHeader tableHeader">
+          <h2>Screening Results</h2>
+          <div class="pager">
+            <span id="batchRowCount">-</span>
+            <label class="pageSizeControl">
+              <span>Per page</span>
+              <select id="batchPageSize">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+            <button id="prevBatchPage" type="button" aria-label="Previous page">‹</button>
+            <span id="batchPage">-</span>
+            <button id="nextBatchPage" type="button" aria-label="Next page">›</button>
+          </div>
+        </div>
         <div class="tableWrap">
           <table>
             <thead>
               <tr>
-                <th>代碼</th>
-                <th>LRC Z-score</th>
-                <th>名稱</th>
-                <th>最新價</th>
-                <th>漲跌幅</th>
-                <th>成交量</th>
-                <th>MA200</th>
-                <th>RSI14</th>
-                <th>行業</th>
+                <th><button class="sortButton" type="button" data-sort="symbol">Symbol</button></th>
+                <th><button class="sortButton" type="button" data-sort="zScore">LRC Z-score</button></th>
+                <th><button class="sortButton" type="button" data-sort="name">Name</button></th>
+                <th><button class="sortButton" type="button" data-sort="price">Latest</button></th>
+                <th><button class="sortButton" type="button" data-sort="changePct">Change %</button></th>
+                <th><button class="sortButton" type="button" data-sort="volume">Volume</button></th>
+                <th><button class="sortButton" type="button" data-sort="ma20">MA20</button></th>
+                <th><button class="sortButton" type="button" data-sort="ma50">MA50</button></th>
+                <th><button class="sortButton" type="button" data-sort="ma200">MA200</button></th>
+                <th><button class="sortButton" type="button" data-sort="rsi14">RSI14</button></th>
+                <th><button class="sortButton" type="button" data-sort="industry">Industry</button></th>
               </tr>
             </thead>
             <tbody id="batchBody"></tbody>
@@ -176,7 +288,111 @@
         </div>
       </section>
       </div>
+
+      <div id="maSlopeView" class="view">
+        <section class="toolbar maSlopeToolbar" aria-label="MA Slope controls">
+          <div>
+            <h1 id="maSlopeTitle">MA Slope</h1>
+            <p id="maSlopeStatus">Calculate moving averages and daily slopes from the local ten-year cache.</p>
+          </div>
+          <form id="maSlopeForm" class="maSlopeControls">
+            <label>
+              <span>Symbol</span>
+              <input id="maSlopeSymbol" value="QQQ" autocomplete="off" />
+            </label>
+            <label>
+              <span>Display Period</span>
+              <select id="maSlopePeriod">
+                <option value="1y">1 year</option>
+                <option value="2y">2 years</option>
+                <option value="3y">3 years</option>
+                <option value="5y" selected>5 years</option>
+                <option value="10y">10 years</option>
+              </select>
+            </label>
+            <label>
+              <span>MA Periods</span>
+              <input id="maSlopePeriods" value="20, 50, 200" autocomplete="off" />
+            </label>
+            <label class="slopeSliderControl">
+              <span>Slope lookback (trading days)</span>
+              <output id="maSlopeWindowValue" for="maSlopeWindow">5</output>
+              <input id="maSlopeWindow" type="range" min="1" max="30" value="5" />
+            </label>
+            <label class="inlineCheck maSlopeCheck">
+              <input id="maSlopeVolume" type="checkbox" />
+              <span>Show volume</span>
+            </label>
+            <label class="inlineCheck maSlopeCheck">
+              <input id="maSlopeLogScale" type="checkbox" />
+              <span>Log price</span>
+            </label>
+            <button type="submit">Analyze</button>
+          </form>
+        </section>
+
+        <section id="maSlopeMetrics" class="maSlopeMetrics" aria-label="MA Slope metrics"></section>
+
+        <section class="maSlopeCharts">
+          <div class="chartPanel">
+            <div class="panelHeader">
+              <h2>Price and Moving Averages</h2>
+              <span id="maSlopePriceHint">Close / MA20 / MA50 / MA200</span>
+            </div>
+            <div id="maSlopePriceLegend" class="interactiveLegend" aria-label="Price chart lines"></div>
+            <div class="chartCanvasWrap">
+              <canvas id="maSlopePriceChart" width="1200" height="500"></canvas>
+              <div id="maSlopePriceTooltip" class="chartTooltip" hidden></div>
+            </div>
+          </div>
+          <div class="chartPanel">
+            <div class="panelHeader">
+              <h2 id="maSlopeChartTitle">MA Slope</h2>
+              <span>% / trading day</span>
+            </div>
+            <div id="maSlopeLegend" class="interactiveLegend" aria-label="Slope chart lines"></div>
+            <div class="chartCanvasWrap">
+              <canvas id="maSlopeChart" width="1200" height="430"></canvas>
+              <div id="maSlopeTooltip" class="chartTooltip" hidden></div>
+            </div>
+          </div>
+        </section>
+
+        <details class="dataDisclosure" open>
+          <summary>
+            <span>Slope Statistics</span>
+            <small id="maSlopeRange">-</small>
+          </summary>
+          <div class="disclosureBody tableWrap">
+            <table class="maSlopeStatsTable">
+              <thead>
+                <tr>
+                  <th>MA</th>
+                  <th>Current</th>
+                  <th>Mean</th>
+                  <th>Std Dev</th>
+                  <th>Min</th>
+                  <th>Min Date</th>
+                  <th>Max</th>
+                  <th>Negative Days %</th>
+                </tr>
+              </thead>
+              <tbody id="maSlopeStatsBody"></tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="dataDisclosure">
+          <summary>Raw Data: Last 30 Rows</summary>
+          <div class="disclosureBody tableWrap">
+            <table class="maSlopeRawTable">
+              <thead id="maSlopeRawHead"></thead>
+              <tbody id="maSlopeRawBody"></tbody>
+            </table>
+          </div>
+        </details>
+      </div>
     </main>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=20260914-i18n"></script>
   </body>
 </html>
